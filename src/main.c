@@ -1,8 +1,19 @@
 
 #include <stdio.h>
 #include <windows.h>
+#include <xaudio2.h>
 
 #include "commons.h"
+#include "bomberic_math.h"
+
+// Procedure type for XAudio2 dll func
+typedef HRESULT XAudio2Create_type (
+    _Outptr_ IXAudio2** ppXAudio2,
+    UINT32 Flags,
+    XAUDIO2_PROCESSOR XAudio2Processor
+);
+#define SAMPLE_RATE 44100
+// #define SAMPLE_RATE 48000
 
 struct Win32Dimensions
 {
@@ -199,6 +210,152 @@ game_update_and_render(
     );
 }
 
+// https://learn.microsoft.com/en-us/windows/win32/xaudio2/xaudio2-key-concepts
+internal_fn void win32_init_xaudio2( HWND window )
+{
+    // TODO(Dolphin): Diagnostics, detect which error happened for what:
+    // https://learn.microsoft.com/en-us/windows/win32/xaudio2/xaudio2-error-codes
+
+    // Init XAudio2 (XAudio2)
+    // HMODULE xaudio2_lib = LoadLibraryW( L"Windows.Media.Audio.dll" );
+    HMODULE xaudio2_lib = LoadLibraryW( L"XAudio2_9.dll" );
+    // HMODULE xaudio2_lib = LoadLibraryW( XAUDIO2_DLL_W );
+    if ( xaudio2_lib == NULL )
+    {
+        _Post_equals_last_error_ DWORD err = GetLastError();
+        printf( "Error loading XAudio2: %li \n", err );
+        MessageBoxW( window, L"Error loading XAudio2 dll", L"Error", MB_OK );
+        exit( EXIT_FAILURE );
+    }
+
+    // MSDN says its necessary to initialize COM object, but it works without it...
+    // HRESULT COM_lib_init = CoInitializeEx( NULL, COINIT_MULTITHREADED );
+    // if ( COM_lib_init != S_OK )
+    // {
+    //     MessageBoxW( window, L"Error initializing COM Library", L"Error", MB_OK );
+    //     exit( EXIT_FAILURE );
+    // }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+    XAudio2Create_type* XAudio2Create_proc = (XAudio2Create_type*)GetProcAddress(
+        xaudio2_lib, "XAudio2Create"
+    );
+#pragma GCC diagnostic pop
+    if ( XAudio2Create_proc == NULL )
+    {
+        _Post_equals_last_error_ DWORD err = GetLastError();
+        printf( "Error loading XAudio2Create() function: %li \n", err );
+        Sleep( 4000 );
+        exit( EXIT_FAILURE );
+    }
+
+    IXAudio2* XAudio2 = NULL;
+    HRESULT create_res = XAudio2Create_proc( &XAudio2, 0, XAUDIO2_DEFAULT_PROCESSOR );
+    if ( create_res != S_OK )
+    {
+        MessageBoxW( window, L"Error for XAudio2Create()", L"Error", MB_OK );
+        exit( EXIT_FAILURE );
+    }
+
+    IXAudio2MasteringVoice* master_voice = NULL;
+    if ( XAudio2->lpVtbl->CreateMasteringVoice(
+        XAudio2, &master_voice,
+        XAUDIO2_DEFAULT_CHANNELS,
+        SAMPLE_RATE,
+        0,                  // Flags
+        NULL,               // Default audio output device
+        NULL,               // Dont use any effects
+        AudioCategory_Other // Stream category
+    ) != S_OK )
+    {
+        MessageBoxW( window, L"Error creating XAudio2 master voice", L"Error", MB_OK );
+        exit( EXIT_FAILURE );
+    }
+
+    WAVEFORMATEX wave_format = { 0 };
+    wave_format.wFormatTag = WAVE_FORMAT_PCM;
+    wave_format.nChannels = 1;
+    wave_format.nSamplesPerSec = SAMPLE_RATE;
+    wave_format.wBitsPerSample = 16;
+    wave_format.nBlockAlign = (wave_format.nChannels * wave_format.wBitsPerSample) / 8;
+    wave_format.nAvgBytesPerSec = wave_format.nSamplesPerSec * wave_format.nBlockAlign;
+
+    printf(
+        "nChannels: %i, wBitsPerSample: %i, nSamplesPerSec: %li, nBlockAlign: %i "
+        "nAvgBytesPerSec: %li \n",
+        wave_format.nChannels, wave_format.wBitsPerSample, wave_format.nSamplesPerSec,
+        wave_format.nBlockAlign, wave_format.nAvgBytesPerSec
+    );
+
+    // IXAudio2VoiceCallback cb = { 0 };
+    // cb.lpVtbl->OnBufferEnd 
+
+    IXAudio2SourceVoice* source_voice = NULL;
+    HRESULT src_voice_result = XAudio2->lpVtbl->CreateSourceVoice(
+        XAudio2, &source_voice, &wave_format,
+        0, // Flags
+        XAUDIO2_DEFAULT_FREQ_RATIO, // Frequency ratio
+        // XAUDIO2_MIN_FREQ_RATIO, // Frequency ratio
+        // &cb, // Callback
+        NULL, // Callback
+        NULL, // Voice sends list
+        NULL // Effect chain
+    );
+    if ( src_voice_result != S_OK )
+    {
+        printf( "ERROR ( 0x%08lx ) \n", src_voice_result );
+        MessageBoxW( window, L"Error createing source voice", L"Error", MB_OK );
+        exit( EXIT_FAILURE );
+    }
+
+    // Prepare samples to play
+    #define DURATION 5 // seconds
+    const int samples_count = SAMPLE_RATE * DURATION;
+    const int TONE_HZ = 440;
+    i16 samples[ SAMPLE_RATE * DURATION ] = { 0 };
+    // i16* samples = malloc( samples_count * sizeof( i16 ) );
+    for ( int i = 0; i < samples_count; i++ )
+    {
+        float t = (float)i / SAMPLE_RATE;
+        float sample = m_sinf(2 * PI * TONE_HZ * t);
+        samples[ i ] = (i16)(sample * 32767);
+    }
+
+    // Buffer to send to XAudio2
+    XAUDIO2_BUFFER buffer = {
+        .AudioBytes = samples_count * sizeof( i16 ),
+        .pAudioData = (BYTE*)samples,
+        .Flags = XAUDIO2_END_OF_STREAM,
+        // .LoopCount = XAUDIO2_LOOP_INFINITE,
+    };
+    HRESULT hr = source_voice->lpVtbl->SubmitSourceBuffer( source_voice, &buffer, NULL );
+    if ( hr != S_OK )
+    {
+        printf( "ERROR( 0x%08lx ) SubmitSourceBuffer \n", hr );
+    }
+
+    source_voice->lpVtbl->SetVolume(source_voice, 0.1f, 0); // Optional
+    HRESULT start_result = source_voice->lpVtbl->Start( source_voice, 0, 0 );
+    if ( start_result != S_OK )
+    {
+        printf( "ERROR( 0x%08lx ) source start buffer \n", start_result );
+    }
+
+    // Wait until buffer is done playing
+    // XAUDIO2_VOICE_STATE state = { 0 };
+    // do {
+    //     source_voice->lpVtbl->GetState(
+    //         source_voice, &state, XAUDIO2_VOICE_NOSAMPLESPLAYED
+    //     );
+    //     printf(
+    //         "state.BuffersQueued: %u, SamplesPlayed: %llu \n",
+    //         state.BuffersQueued, state.SamplesPlayed
+    //     );
+    //     Sleep(100);
+    // } while (state.BuffersQueued > 0);
+}
+
 internal_fn struct Win32Dimensions
 win32_get_window_dimensions( HWND window_handle )
 {
@@ -221,6 +378,7 @@ win32_resize_dib_section(
     bitmap->height = height;
     bitmap->pitch = bitmap->width * bitmap->bytes_per_pixel;
 
+    // https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapinfoheader
     bitmap->info.bmiHeader.biWidth = bitmap->width;
     bitmap->info.bmiHeader.biHeight = -bitmap->height;
     // Negative biHeight means top-down DIB (origin in top-left corner)
@@ -403,6 +561,7 @@ int WINAPI WinMain(
         0,                              // Optional window styles.
         window_class.lpszClassName,     // Window class
         L"Win32",    // Window text (title bar if has one)
+        // https://learn.microsoft.com/en-us/windows/win32/winmsg/window-styles
         WS_OVERLAPPEDWINDOW,            // Window style
         500, 300,                                   // Pos
         // window_dimensions.width, window_dimensions.height,           // Size
@@ -417,13 +576,17 @@ int WINAPI WinMain(
     {
         _Post_equals_last_error_ DWORD err = GetLastError();
         printf( "Error creating window: %li \n", err );
+        MessageBoxW(
+            NULL, L"Error creating a window", L"Error", MB_OK
+        );
         exit( EXIT_FAILURE );
     }
 
     // render_size = window_dimensions;
     win32_resize_dib_section( &bitmap_buffer, render_size.width, render_size.height );
-
     ShowWindow( window_handle, show_type );
+
+    win32_init_xaudio2( window_handle );
 
     HDC device_ctx = GetDC( window_handle );
     while ( app_running )
