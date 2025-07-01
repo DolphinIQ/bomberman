@@ -43,3 +43,9 @@ typedef u32 bool32;
 
 // For disabling compiler warnings
 void unused( ... ) {}
+
+// TODO(Dolphin): expand this once multithreaded is added
+struct ThreadContext
+{
+    int unused;
+};

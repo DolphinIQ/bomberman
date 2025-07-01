@@ -1,0 +1,1 @@
+gcc -Wall -Wextra -ggdb -shared src/game.c -o game.dll

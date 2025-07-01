@@ -1,10 +1,10 @@
-
 #include <stdio.h>
 #include <windows.h>
 #include <xaudio2.h>
 
 #include "commons.h"
 #include "bomberic_math.h"
+#include "game.h"
 
 // Procedure type for XAudio2 dll func
 typedef HRESULT XAudio2Create_type (
@@ -15,12 +15,27 @@ typedef HRESULT XAudio2Create_type (
 #define SAMPLE_RATE 44100
 // #define SAMPLE_RATE 48000
 
+// NOTE(Dolphin): Hard coded for now. Maybe do dynamic path finding in the future? :/
+const char* game_dll_name = "D:\\0_Coding_0\\C\\0_Games\\bomberic\\game.dll";
+const char* game_temp_dll_name = "game_temp.dll";
+
+struct Win32GameCode
+{
+    HMODULE dll;
+    game_update_and_render_fn_type* game_update_and_render;
+    // game_update_audio *GameUpdateAudio;
+
+    FILETIME last_write_time;
+    bool32 is_valid;
+};
+
 struct Win32Dimensions
 {
     int width;
     int height;
 };
 
+// https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapinfoheader
 struct Win32Bitmap
 {
     BITMAPINFO info;
@@ -29,46 +44,6 @@ struct Win32Bitmap
     int height;
     int pitch;
     const int bytes_per_pixel;
-};
-
-struct GameOffscreenBuffer
-{
-    void* memory;
-    int width;
-    int height;
-    int pitch;
-    const int bytes_per_pixel;
-};
-
-struct Button
-{
-    bool8 was_down; // NOTE(Dolphin): not usable right now
-    bool8 is_down;
-};
-
-struct Input
-{
-    union
-    {
-        struct
-        {
-            struct Button up;
-            struct Button down;
-            struct Button left;
-            struct Button right;
-        };
-        struct Button buttons[ 4 ];
-    };
-};
-
-struct GameState
-{
-    struct Player
-    {
-        float x;
-        float y;
-        float speed;
-    } player;
 };
 
 #define PIXEL_BYTE_SIZE 4
@@ -89,125 +64,80 @@ global_var struct Win32Dimensions window_dimensions = { 1280, 720 };
 global_var struct Win32Dimensions render_size = { 320, 180 };
 global_var bool32 app_running = true;
 global_var u64 frame_count = 0;
-
 global_var struct Input input = { 0 };
-global_var struct GameState game_state =
+
+internal_fn FILETIME win32_get_file_write_time( const char *file_path )
 {
-    .player = {
-        .x = 2, .y = 2,
-        .speed = 1.0f
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    BOOL success = GetFileAttributesExA( file_path, GetFileExInfoStandard, &data );
+    if ( success == false )
+    {
+        _Post_equals_last_error_ DWORD err = GetLastError();
+        printf( "ERROR (%li)! Cant get '%s' file write time \n", err, file_path );
+        exit( EXIT_FAILURE );
     }
-};
+    return data.ftLastWriteTime;
+}
 
-// #define RED_BIT 16
-// #define GREEN_BIT 8
-// // #define RED_BIT 10
-// // #define GREEN_BIT 5
-// internal_fn void render_gradient( struct Win32Bitmap* bitmap, u64 frame )
-// {
-//     u32* pixels = bitmap->memory;
-//     // u16* pixels = bitmap->memory;
-//     // u8* pixels = bitmap->memory;
-//     int i = 0;
-//     for ( int y = 0; y < bitmap->height; y++ )
-//     {
-//         for ( int x = 0; x < bitmap->width; x++ )
-//         {
-//             u8 red = x + frame / 2;
-//             u8 green = y + frame / 2;
-//             pixels[ i ] = 0 | (green << GREEN_BIT) | (red << RED_BIT);
-//             // pixels[ i ] = i + frame / 2;
-//             i += 1;
-//         }
-//     }
-// }
-
-internal_fn void
-clear_screen_buffer( struct GameOffscreenBuffer* bitmap )
+internal_fn struct Win32GameCode win32_load_game_code( HWND window )
 {
-    memset(
-        bitmap->memory, 0,
-        bitmap->width * bitmap->height * bitmap->bytes_per_pixel
+    // Wait a moment to make sure that the changed source dll is finished compiling.
+    // Otherwise its copied unfinished resulting in temp having size of 0 KB.
+    Sleep( 16 );
+
+    struct Win32GameCode game_code = { 0 };
+    game_code.last_write_time = win32_get_file_write_time( game_dll_name );
+
+    // Copy and run the copied DLL so that we dont have write access violation
+    BOOL success = CopyFileA( game_dll_name, game_temp_dll_name, false );
+    if ( success == false )
+    {
+        _Post_equals_last_error_ DWORD err = GetLastError();
+        printf( "ERROR (%li)! Cant copy '%s' file \n", err, game_dll_name );
+        exit( EXIT_FAILURE );
+    }
+
+    game_code.dll = LoadLibraryA( game_temp_dll_name );
+    if ( game_code.dll == NULL )
+    {
+        _Post_equals_last_error_ DWORD err = GetLastError();
+        printf(
+            "%s %s:%i Error (%li) loading Game Code dll '%s' \n",
+            __FILE__, __FUNCTION__, __LINE__,  err, game_temp_dll_name
+        );
+        MessageBoxW( window, L"Error loading Game Code dll", L"Error", MB_OK );
+        exit( EXIT_FAILURE );
+    }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+
+    game_code.game_update_and_render = (game_update_and_render_fn_type*)GetProcAddress(
+        game_code.dll, game_update_and_render_FN_NAME
     );
+
+#pragma GCC diagnostic pop
+
+    game_code.is_valid = ( true && game_code.game_update_and_render );
+    if ( game_code.is_valid == false )
+    {
+        MessageBoxW( window, L"Cant load functions in module", L"Error", MB_OK );
+        exit( EXIT_FAILURE );
+    }
+
+    printf( "Reloaded game code \n" );
+    return game_code;
 }
 
-internal_fn void
-render_borders( struct GameOffscreenBuffer* bitmap, int border_w )
+internal_fn void win32_unload_game_code( struct Win32GameCode* game_code )
 {
-    u32* pixels = bitmap->memory;
-    // u16* pixels = bitmap->memory;
-    int i = 0;
-    for ( int y = 0; y < bitmap->height; y++ )
+    if( game_code->dll )
     {
-        for ( int x = 0; x < bitmap->width; x++ )
-        {
-            if ( x <= border_w || x > bitmap->width - border_w ||
-                 y <= border_w || y > bitmap->height - border_w )
-            {
-                pixels[ i ] = 0x446644;
-                // pixels[ i ] = 0 | (255 << 10);
-            }
-            i += 1;
-        }
+        FreeLibrary( game_code->dll );
+        game_code->dll = NULL;
     }
-}
-
-internal_fn void draw_player(
-    struct GameOffscreenBuffer* bitmap,
-    float pos_x, float pos_y,
-    float width, float height
-)
-{
-    u32* pixels = bitmap->memory;
-    for ( float y = pos_y; y < pos_y + height; y += 1.0f )
-    {
-        for ( float x = pos_x; x < pos_x + width; x += 1.0f )
-        {
-            const int i = y * bitmap->width + x;
-            pixels[ i ] = 0xFFFFFF;
-        }
-    }
-}
-
-internal_fn void
-game_update_and_render(
-    struct GameState* gs,
-    const struct Input* input,
-    struct GameOffscreenBuffer* buffer
-)
-{
-    clear_screen_buffer( buffer );
-    render_borders( buffer, 20 );
-
-    // Player
-    float dir_x = 0.0f;
-    float dir_y = 0.0f;
-    if ( input->up.is_down )
-    {
-        dir_y -= 1.0;
-    }
-    if ( input->down.is_down )
-    {
-        dir_y += 1.0;
-    }
-    if ( input->left.is_down )
-    {
-        dir_x -= 1.0;
-    }
-    if ( input->right.is_down )
-    {
-        dir_x += 1.0;
-    }
-    // TODO(Dolphin): This results in higher speed diagonally. Fix when vectors
-    dir_x *= gs->player.speed;
-    dir_y *= gs->player.speed;
-
-    gs->player.x += dir_x;
-    gs->player.y += dir_y;
-
-    draw_player(
-        buffer, game_state.player.x, game_state.player.y, 10, 15
-    );
+    game_code->is_valid = false;
+    game_code->game_update_and_render = NULL;
 }
 
 // https://learn.microsoft.com/en-us/windows/win32/xaudio2/xaudio2-key-concepts
@@ -217,9 +147,9 @@ internal_fn void win32_init_xaudio2( HWND window )
     // https://learn.microsoft.com/en-us/windows/win32/xaudio2/xaudio2-error-codes
 
     // Init XAudio2 (XAudio2)
-    // HMODULE xaudio2_lib = LoadLibraryW( L"Windows.Media.Audio.dll" );
-    HMODULE xaudio2_lib = LoadLibraryW( L"XAudio2_9.dll" );
-    // HMODULE xaudio2_lib = LoadLibraryW( XAUDIO2_DLL_W );
+    // HMODULE xaudio2_lib = LoadLibraryA( "Windows.Media.Audio.dll" );
+    HMODULE xaudio2_lib = LoadLibraryA( "XAudio2_9.dll" );
+    // HMODULE xaudio2_lib = LoadLibraryA( XAUDIO2_DLL );
     if ( xaudio2_lib == NULL )
     {
         _Post_equals_last_error_ DWORD err = GetLastError();
@@ -238,10 +168,13 @@ internal_fn void win32_init_xaudio2( HWND window )
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-function-type"
+
     XAudio2Create_type* XAudio2Create_proc = (XAudio2Create_type*)GetProcAddress(
         xaudio2_lib, "XAudio2Create"
     );
+
 #pragma GCC diagnostic pop
+
     if ( XAudio2Create_proc == NULL )
     {
         _Post_equals_last_error_ DWORD err = GetLastError();
@@ -281,12 +214,13 @@ internal_fn void win32_init_xaudio2( HWND window )
     wave_format.nBlockAlign = (wave_format.nChannels * wave_format.wBitsPerSample) / 8;
     wave_format.nAvgBytesPerSec = wave_format.nSamplesPerSec * wave_format.nBlockAlign;
 
-    printf(
-        "nChannels: %i, wBitsPerSample: %i, nSamplesPerSec: %li, nBlockAlign: %i "
-        "nAvgBytesPerSec: %li \n",
-        wave_format.nChannels, wave_format.wBitsPerSample, wave_format.nSamplesPerSec,
-        wave_format.nBlockAlign, wave_format.nAvgBytesPerSec
-    );
+    // TODO(Dolphin): Remove once playing WAV files works
+    // printf(
+    //     "nChannels: %i, wBitsPerSample: %i, nSamplesPerSec: %li, nBlockAlign: %i "
+    //     "nAvgBytesPerSec: %li \n",
+    //     wave_format.nChannels, wave_format.wBitsPerSample, wave_format.nSamplesPerSec,
+    //     wave_format.nBlockAlign, wave_format.nAvgBytesPerSec
+    // );
 
     // IXAudio2VoiceCallback cb = { 0 };
     // cb.lpVtbl->OnBufferEnd 
@@ -310,7 +244,7 @@ internal_fn void win32_init_xaudio2( HWND window )
     }
 
     // Prepare samples to play
-    #define DURATION 5 // seconds
+    #define DURATION 1 // seconds
     const int samples_count = SAMPLE_RATE * DURATION;
     const int TONE_HZ = 440;
     i16 samples[ SAMPLE_RATE * DURATION ] = { 0 };
@@ -329,13 +263,15 @@ internal_fn void win32_init_xaudio2( HWND window )
         .Flags = XAUDIO2_END_OF_STREAM,
         // .LoopCount = XAUDIO2_LOOP_INFINITE,
     };
-    HRESULT hr = source_voice->lpVtbl->SubmitSourceBuffer( source_voice, &buffer, NULL );
-    if ( hr != S_OK )
+    source_voice->lpVtbl->SetVolume(source_voice, 0.02f, 0); // Optional
+    HRESULT src_buf_result = source_voice->lpVtbl->SubmitSourceBuffer(
+        source_voice, &buffer, NULL
+    );
+    if ( src_buf_result != S_OK )
     {
-        printf( "ERROR( 0x%08lx ) SubmitSourceBuffer \n", hr );
+        printf( "ERROR( 0x%08lx ) SubmitSourceBuffer \n", src_buf_result );
     }
 
-    source_voice->lpVtbl->SetVolume(source_voice, 0.1f, 0); // Optional
     HRESULT start_result = source_voice->lpVtbl->Start( source_voice, 0, 0 );
     if ( start_result != S_OK )
     {
@@ -378,7 +314,6 @@ win32_resize_dib_section(
     bitmap->height = height;
     bitmap->pitch = bitmap->width * bitmap->bytes_per_pixel;
 
-    // https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapinfoheader
     bitmap->info.bmiHeader.biWidth = bitmap->width;
     bitmap->info.bmiHeader.biHeight = -bitmap->height;
     // Negative biHeight means top-down DIB (origin in top-left corner)
@@ -429,8 +364,8 @@ win32_main_window_callback(
             app_running = false;
             printf( "WM_DESTROY\n" );
         } break;
-        case WM_ACTIVATEAPP: {
-            printf( "WM_ACTIVATEAPP\n" );
+        case WM_ACTIVATEAPP: { // When app gains or loses focus
+            // printf( "WM_ACTIVATEAPP\n" );
         } break;
         case WM_SYSKEYDOWN:
         case WM_SYSKEYUP:
@@ -582,11 +517,21 @@ int WINAPI WinMain(
         exit( EXIT_FAILURE );
     }
 
-    // render_size = window_dimensions;
-    win32_resize_dib_section( &bitmap_buffer, render_size.width, render_size.height );
     ShowWindow( window_handle, show_type );
 
+    struct GameState game_state =
+    {
+        .player = {
+            .x = 2, .y = 2,
+            .speed = 1.0f
+        }
+    };
+
+    // render_size = window_dimensions;
+    win32_resize_dib_section( &bitmap_buffer, render_size.width, render_size.height );
     win32_init_xaudio2( window_handle );
+    struct Win32GameCode game_code = win32_load_game_code( window_handle );
+    struct ThreadContext thread_context = { 0 };
 
     HDC device_ctx = GetDC( window_handle );
     while ( app_running )
@@ -600,6 +545,15 @@ int WINAPI WinMain(
             DispatchMessageW( &msg );
         }
 
+        FILETIME game_dll_curr_write_time = win32_get_file_write_time( game_dll_name );
+        if( CompareFileTime(
+            &game_dll_curr_write_time, &game_code.last_write_time
+        ) != 0 )
+        {
+            win32_unload_game_code( &game_code );
+            game_code = win32_load_game_code( window_handle );
+        }
+
         // Pack screen buffer into a platform independent struct for game
         struct GameOffscreenBuffer offscreen_buffer = {
             .memory = bitmap_buffer.memory,
@@ -609,7 +563,9 @@ int WINAPI WinMain(
             .bytes_per_pixel = bitmap_buffer.bytes_per_pixel,
         };
 
-        game_update_and_render( &game_state, &input, &offscreen_buffer );
+        game_code.game_update_and_render(
+            &thread_context, &game_state, &input, &offscreen_buffer
+        );
 
         win32_display_buffer_in_window( &bitmap_buffer, device_ctx );
 
