@@ -1,3 +1,6 @@
+
+#define DEBUG 1
+
 #include <stdio.h>
 #include <windows.h>
 #include <xaudio2.h>
@@ -62,9 +65,8 @@ global_var struct Win32Bitmap bitmap_buffer = {
 };
 global_var struct Win32Dimensions window_dimensions = { 1280, 720 };
 global_var struct Win32Dimensions render_size = { 320, 180 };
-global_var bool32 app_running = true;
-global_var u64 frame_count = 0;
 global_var struct Input input = { 0 };
+global_var bool32 app_running = true;
 
 internal_fn FILETIME win32_get_file_write_time( const char *file_path )
 {
@@ -252,7 +254,7 @@ internal_fn void win32_init_xaudio2( HWND window )
     for ( int i = 0; i < samples_count; i++ )
     {
         float t = (float)i / SAMPLE_RATE;
-        float sample = m_sinf(2 * PI * TONE_HZ * t);
+        float sample = math_sinf(2 * PI * TONE_HZ * t);
         samples[ i ] = (i16)(sample * 32767);
     }
 
@@ -519,20 +521,27 @@ int WINAPI WinMain(
 
     ShowWindow( window_handle, show_type );
 
-    struct GameState game_state =
-    {
-        .player = {
-            .x = 2, .y = 2,
-            .speed = 1.0f
-        }
-    };
-
     // render_size = window_dimensions;
     win32_resize_dib_section( &bitmap_buffer, render_size.width, render_size.height );
     win32_init_xaudio2( window_handle );
     struct Win32GameCode game_code = win32_load_game_code( window_handle );
     struct ThreadContext thread_context = { 0 };
 
+    struct GameMemory game_memory = { 0 };
+    game_memory.permanent_memory_size = 1*MB;
+    // This will make all pointer addresses consistent across all runs.
+    // Great for debuggging!
+#if DEBUG
+    const LPVOID base_address = (LPVOID)( 1*TB );
+#else
+    const LPVOID base_address = 0;
+#endif
+    game_memory.permanent_memory = VirtualAlloc(
+        base_address, game_memory.permanent_memory_size,
+        MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE
+    );
+
+    u64 frame_count = 0;
     HDC device_ctx = GetDC( window_handle );
     while ( app_running )
     {
@@ -564,7 +573,7 @@ int WINAPI WinMain(
         };
 
         game_code.game_update_and_render(
-            &thread_context, &game_state, &input, &offscreen_buffer
+            &thread_context, &game_memory, &input, &offscreen_buffer
         );
 
         win32_display_buffer_in_window( &bitmap_buffer, device_ctx );

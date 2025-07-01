@@ -1,4 +1,6 @@
 
+#define DEBUG 1
+
 #include "commons.h"
 #include "game.h"
 
@@ -71,12 +73,25 @@ internal_fn void game_render_player(
 
 void game_update_and_render(
     struct ThreadContext* thread,
-    struct GameState* gs,
+    struct GameMemory* game_memory,
     const struct Input* input,
     struct GameOffscreenBuffer* buffer
 )
 {
     unused( thread );
+
+    Assert( sizeof( struct GameState ) <= game_memory->permanent_memory_size );
+    struct GameState* gs = game_memory->permanent_memory;
+
+    // Initialize game state when this function is ran for the first time
+    if ( game_memory->is_initialized == false )
+    {
+        gs->player = (struct Player){
+            .x = 2, .y = 2,
+            .speed = 1.0f
+        };
+        game_memory->is_initialized = true;
+    }
 
     game_clear_screen_buffer( buffer );
     game_render_borders( buffer, 20 );

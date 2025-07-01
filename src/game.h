@@ -23,6 +23,13 @@ struct Input
     };
 };
 
+struct GameMemory
+{
+    bool32 is_initialized;
+    void* permanent_memory;
+    u64 permanent_memory_size;
+};
+
 struct GameOffscreenBuffer
 {
     void* memory;
@@ -45,7 +52,7 @@ struct GameState
 // EXPORTED FUNCTIONS
 typedef void game_update_and_render_fn_type(
     struct ThreadContext* thread,
-    struct GameState* gs,
+    struct GameMemory* game_memory,
     const struct Input* input,
     struct GameOffscreenBuffer* buffer
 );

@@ -1,11 +1,7 @@
 #pragma once
 
 #include <stdint.h>
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-function-type"
-// code
-#pragma GCC diagnostic pop
+#include <stdio.h>
 
 #define internal_fn     static
 #define local_persist   static
@@ -17,6 +13,7 @@
 #define KB (1024)
 #define MB (1024 * 1024LLU)
 #define GB (1024 * 1024 * 1024LLU)
+#define TB (1024 * 1024 *  1024 * 1024LLU)
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -49,3 +46,20 @@ struct ThreadContext
 {
     int unused;
 };
+
+// void assert( bool32 expression )
+// {
+//     if ( expression != true ) *(int*)0 = 100;
+// }
+
+#if DEBUG
+    #define Assert( expression ) \
+        if ( (expression) != true ) \
+        { \
+            printf( "Assert( %s ) failed in %s:%i at %s() \n", \
+                    #expression, __FILE__, __LINE__, __FUNCTION__ ); \
+            *(int*)0 = 100; \
+        }
+#else
+    #define Assert( expression )
+#endif
