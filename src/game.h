@@ -49,9 +49,16 @@ struct GameState
     } player;
 };
 
+struct PlatformCode
+{
+    float (*get_seconds_elapsed)( i64 start_counter, i64 end_counter );
+    i64 (*get_current_counter)();
+};
+
 // EXPORTED FUNCTIONS
 typedef void game_update_and_render_fn_type(
     struct ThreadContext* thread,
+    const struct PlatformCode* platform,
     struct GameMemory* game_memory,
     const struct Input* input,
     struct GameOffscreenBuffer* buffer

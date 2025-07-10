@@ -66,7 +66,22 @@ global_var struct Win32Bitmap bitmap_buffer = {
 global_var struct Win32Dimensions window_dimensions = { 1280, 720 };
 global_var struct Win32Dimensions render_size = { 320, 180 };
 global_var struct Input input = { 0 };
+global_var i64 global_perf_frequency = 0; // COUNTS PER SECOND
 global_var bool32 app_running = true;
+
+internal_fn i64 win32_get_current_counter()
+{
+    LARGE_INTEGER result;
+    QueryPerformanceCounter( &result );
+    return result.QuadPart;
+}
+
+internal_fn float win32_get_seconds_elapsed( i64 start, i64 end )
+{
+    // float result = (double)(end.QuadPart - start.QuadPart) / (double)global_perf_frequency;
+    float result = ( (float)(end - start) ) / global_perf_frequency;
+    return result;
+}
 
 internal_fn FILETIME win32_get_file_write_time( const char *file_path )
 {
@@ -481,7 +496,7 @@ int WINAPI WinMain(
 )
 {
     unused( prev_program_handle, command_line );
-    
+
     const WNDCLASSW window_class = {
         .style = CS_HREDRAW | CS_VREDRAW, // redraw on window resize
         .lpfnWndProc = win32_main_window_callback,
@@ -521,10 +536,15 @@ int WINAPI WinMain(
 
     ShowWindow( window_handle, show_type );
 
+    HDC device_ctx = GetDC( window_handle );
     // render_size = window_dimensions;
     win32_resize_dib_section( &bitmap_buffer, render_size.width, render_size.height );
     win32_init_xaudio2( window_handle );
     struct Win32GameCode game_code = win32_load_game_code( window_handle );
+    struct PlatformCode platform_code = {
+        .get_current_counter = win32_get_current_counter,
+        .get_seconds_elapsed = win32_get_seconds_elapsed
+    };
     struct ThreadContext thread_context = { 0 };
 
     struct GameMemory game_memory = { 0 };
@@ -541,10 +561,40 @@ int WINAPI WinMain(
         MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE
     );
 
+    // Timing Initialization
+    const int win32_refresh_rate = GetDeviceCaps( device_ctx, VREFRESH );
+    const int monitor_refresh_Hz = win32_refresh_rate > 1 ? win32_refresh_rate : 60;
+    const int game_update_Hz = monitor_refresh_Hz / 2;
+    const float target_sec_per_frame = 1.0 / game_update_Hz;
+    // const float target_sec_per_frame =  1.0 / 60.0;
+    const UINT desired_scheduler_ms = 1;
+    bool32 sleep_is_granular = (timeBeginPeriod( desired_scheduler_ms ) == TIMERR_NOERROR);
+    printf(
+        "Sleep is granular: %i | Monitor refresh rate (Hz): %i | Target ms/frame: %f \n",
+        sleep_is_granular, monitor_refresh_Hz, (target_sec_per_frame * 1000)
+    );
+    LARGE_INTEGER perf_frequency; // COUNTS PER SECOND
+    if ( !QueryPerformanceFrequency( &perf_frequency ) )
+    {
+        MessageBoxA( window_handle, "Cant QueryPerformanceFrequency", "Error!", MB_OK );
+        exit( EXIT_FAILURE );
+    }
+    global_perf_frequency = perf_frequency.QuadPart;
+
+    float delta_time = 0.0f;
+    double total_elapsed_time = 0.0;
+    i64 start_counter = win32_get_current_counter();
+    i64 end_counter = win32_get_current_counter();
     u64 frame_count = 0;
-    HDC device_ctx = GetDC( window_handle );
+
     while ( app_running )
     {
+        delta_time = win32_get_seconds_elapsed( start_counter, win32_get_current_counter() );
+        total_elapsed_time += delta_time;
+
+        start_counter = win32_get_current_counter();
+        // u64 last_cycle_count = ReadTimeStampCounter(); // __rdtsc
+
         MSG msg; // Process all messages
         while( PeekMessageW( &msg, NULL, 0, 0, PM_REMOVE ) )
         {
@@ -573,13 +623,46 @@ int WINAPI WinMain(
         };
 
         game_code.game_update_and_render(
-            &thread_context, &game_memory, &input, &offscreen_buffer
+            &thread_context, &platform_code, &game_memory, &input, &offscreen_buffer
         );
 
         win32_display_buffer_in_window( &bitmap_buffer, device_ctx );
 
+        { // Timing of the frame
+            end_counter = win32_get_current_counter();
+            // u64 end_cycle_count = ReadTimeStampCounter(); // __rdtsc
+
+            i64 counts_per_frame = end_counter - start_counter;
+            i64 frames_per_second = global_perf_frequency / counts_per_frame;
+            // u64 cycles_per_frame = end_cycle_count - last_cycle_count;
+            // i64 miliseconds_per_frame = 1000 * counts_per_frame / global_perf_frequency;
+            // i64 microseconds_per_frame = 1000000 * counts_per_frame / global_perf_frequency;
+            // Can use 'frames_per_second * cycles_per_frame' to get processor GHz speed
+            float seconds_elapsed_this_frame = win32_get_seconds_elapsed(
+                start_counter, win32_get_current_counter()
+            );
+
+            // printf(
+            //     "| elapsed: %f | delta: %f | ms/f: %f | FPS: %lli | \n", total_elapsed_time,
+            //     delta_time, seconds_elapsed_this_frame * 1000, frames_per_second
+            // );
+            if ( frame_count == 60 ) printf( "FPS: %lli \n", frames_per_second );
+
+            float sleep_duration_s = target_sec_per_frame - seconds_elapsed_this_frame;
+            if ( sleep_duration_s > 0 )
+            {
+                if ( sleep_is_granular )
+                {
+                    Sleep( (DWORD)(sleep_duration_s * 1000) );
+                }
+                else // Sleep a fixed target time - 1 milisecond
+                {
+                    Sleep( (DWORD)(target_sec_per_frame * 1000) - 1 );
+                }
+            }
+        }
+
         frame_count += 1;
-        Sleep( 15 );
     }
 
     ReleaseDC( window_handle, device_ctx );

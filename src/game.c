@@ -4,6 +4,11 @@
 #include "commons.h"
 #include "game.h"
 
+global_var float delta_time = 0.0f;
+// global_var double total_elapsed_time = 0.0;
+global_var i64 start_counter = 0;
+global_var i64 end_counter = 0;
+
 // #define RED_BIT 16
 // #define GREEN_BIT 8
 // // #define RED_BIT 10
@@ -65,7 +70,8 @@ internal_fn void game_render_player(
     {
         for ( float x = pos_x; x < pos_x + width; x += 1.0f )
         {
-            const int i = y * bitmap->width + x;
+            // const int i = y * bitmap->width + x;
+            const int i = (int)y * bitmap->width + (int)x;
             pixels[ i ] = 0xFFFFFF;
         }
     }
@@ -73,6 +79,7 @@ internal_fn void game_render_player(
 
 void game_update_and_render(
     struct ThreadContext* thread,
+    const struct PlatformCode* platform,
     struct GameMemory* game_memory,
     const struct Input* input,
     struct GameOffscreenBuffer* buffer
@@ -88,10 +95,18 @@ void game_update_and_render(
     {
         gs->player = (struct Player){
             .x = 2, .y = 2,
-            .speed = 1.0f
+            .speed = 50.0f
         };
+
+        start_counter = platform->get_current_counter();
+        end_counter = platform->get_current_counter();
+
         game_memory->is_initialized = true;
     }
+
+    delta_time = platform->get_seconds_elapsed( start_counter, platform->get_current_counter() );
+
+    start_counter = platform->get_current_counter();
 
     game_clear_screen_buffer( buffer );
     game_render_borders( buffer, 20 );
@@ -101,23 +116,23 @@ void game_update_and_render(
     float dir_y = 0.0f;
     if ( input->up.is_down )
     {
-        dir_y -= 1.0;
+        dir_y -= 1.0f;
     }
     if ( input->down.is_down )
     {
-        dir_y += 1.0;
+        dir_y += 1.0f;
     }
     if ( input->left.is_down )
     {
-        dir_x -= 1.0;
+        dir_x -= 1.0f;
     }
     if ( input->right.is_down )
     {
-        dir_x += 1.0;
+        dir_x += 1.0f;
     }
     // TODO(Dolphin): This results in higher speed diagonally. Fix when vectors
-    dir_x *= gs->player.speed;
-    dir_y *= gs->player.speed;
+    dir_x *= gs->player.speed * delta_time;
+    dir_y *= gs->player.speed * delta_time;
 
     gs->player.x += dir_x;
     gs->player.y += dir_y;
@@ -125,4 +140,6 @@ void game_update_and_render(
     game_render_player(
         buffer, gs->player.x, gs->player.y, 10, 15
     );
+
+    end_counter = platform->get_current_counter();
 }
