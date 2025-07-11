@@ -2,6 +2,7 @@
 
 #include <emmintrin.h>
 #include <immintrin.h>
+#include "commons.h"
 
 // TODO(Dolphin): Do some kind of a more professional check
 #define AVX256_SUPPORTED 1
@@ -20,6 +21,11 @@ internal_fn inline float math_sinf( float value )
 internal_fn inline int math_floor_f32_to_int( float value )
 {
     int result = (int)floorf( value );
+    return result;
+}
+internal_fn inline int math_ceil_f32_to_int( float value )
+{
+    int result = (int)ceilf( value );
     return result;
 }
 

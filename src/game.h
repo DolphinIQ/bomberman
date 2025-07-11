@@ -36,7 +36,9 @@ struct GameOffscreenBuffer
     int width;
     int height;
     int pitch;
-    float pixels_per_meters; // Its always used in drawing so I decided to put it here
+    float pixels_per_meter; // Its always used in drawing so I decided to put it here
+    int ratio_w;
+    int ratio_h;
     const int bytes_per_pixel;
 };
 

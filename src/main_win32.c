@@ -6,7 +6,7 @@
 #include <xaudio2.h>
 
 #include "commons.h"
-#include "bomberic_math.h"
+#include "bomberman_math.h"
 #include "game.h"
 
 // Procedure type for XAudio2 dll func
@@ -19,7 +19,7 @@ typedef HRESULT XAudio2Create_type (
 // #define SAMPLE_RATE 48000
 
 // NOTE(Dolphin): Hard coded for now. Maybe do dynamic path finding in the future? :/
-const char* game_dll_name = "D:\\0_Coding_0\\C\\0_Games\\bomberic\\game.dll";
+const char* game_dll_name = "D:\\0_Coding_0\\C\\0_Games\\bomberman\\game.dll";
 const char* game_temp_dll_name = "game_temp.dll";
 
 struct Win32GameCode
@@ -64,7 +64,7 @@ global_var struct Win32Bitmap bitmap_buffer = {
     .bytes_per_pixel = PIXEL_BYTE_SIZE
 };
 global_var struct Win32Dimensions window_dimensions = { 1280, 720 };
-global_var struct Win32Dimensions render_size = { 320, 180 };
+global_var struct Win32Dimensions render_size = { 160, 90 };
 global_var struct Input input = { 0 };
 global_var i64 global_perf_frequency = 0; // COUNTS PER SECOND
 global_var bool32 app_running = true;
@@ -554,6 +554,8 @@ int WINAPI WinMain(
         .height = bitmap_buffer.height,
         .pitch = bitmap_buffer.pitch,
         .bytes_per_pixel = bitmap_buffer.bytes_per_pixel,
+        .ratio_w = 16,
+        .ratio_h = 9
     };
 
     struct GameMemory game_memory = { 0 };

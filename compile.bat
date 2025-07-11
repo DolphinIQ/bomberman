@@ -1,7 +1,7 @@
 SET compiler=gcc
-@REM %compiler% -Wall -Wextra -g src/main.c -o bomberic | /.bomberic
-gcc -Wall -Wextra -ggdb src/main.c -l"gdi32" -l"winmm" -o bomberic | /.bomberic
+@REM %compiler% -Wall -Wextra -g src/main_win32.c -o bomberman | /.bomberman
+gcc -Wall -Wextra -ggdb src/main_win32.c -l"gdi32" -l"winmm" -o bomberman | /.bomberman
 
-@REM bomberic
+@REM bomberman
 
 timeout /t 30
