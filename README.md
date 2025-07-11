@@ -14,6 +14,8 @@ It features:
 - SIMD intrinsics for speed.
 - Tile based world.
 
+! Work in progress !
+
 This project is meant to be educational only.
 
 This game is a replica of a no longer available bomberman game, that I'm making for my mom.

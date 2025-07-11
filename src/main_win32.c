@@ -598,6 +598,7 @@ int WINAPI WinMain(
     i64 end_counter = win32_get_current_counter();
     u64 frame_count = 0;
 
+    // TODO(Dolphin): Cleanup the loop
     while ( app_running )
     {
         delta_time = win32_get_seconds_elapsed( start_counter, win32_get_current_counter() );
