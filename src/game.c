@@ -2,6 +2,7 @@
 #define DEBUG 1
 
 #include "commons.h"
+#include "bomberic_math.h"
 #include "game.h"
 
 global_var float delta_time = 0.0f;
@@ -30,31 +31,83 @@ global_var i64 end_counter = 0;
 //     }
 // }
 
-internal_fn void
-game_clear_screen_buffer( struct GameOffscreenBuffer* bitmap )
+internal_fn void game_clear_screen_buffer( struct GameOffscreenBuffer* bitmap )
 {
     u32* buffer = (u32*)bitmap->memory;
-    for ( int i = 0; i < bitmap->width * bitmap->height; i++ )
+
+    // SIMD version
+#if 1
+    int bitmap_length = bitmap->width * bitmap->height;
+    if ( bitmap_length % 16 == 0 && AVX256_SUPPORTED )
+    { // ( about 600% faster with _mm256_setzero_si256() )
+        for ( int i = 0; i < bitmap_length; i += 256 / 32 )
+        {
+            simd_256i_store_zero( &buffer[ i ] );
+        }
+    }
+    else if ( bitmap_length % 4 == 0 )
+    { // ( about 140% faster with _mm_set1_epi32, 333% faster with _mm_setzero_si128() )
+        for ( int i = 0; i < bitmap_length; i += 128 / 32 )
+        {
+            simd_128i_store_zero( &buffer[ i ] );
+        }
+    }
+    else // do a normal loop
+#endif
     {
-        buffer[ i ] = 0;
+        for ( int i = 0; i < bitmap->width * bitmap->height; i++ )
+        {
+            buffer[ i ] = 0;
+        }
+    }
+    
+}
+
+// internal_fn int pos_to_map_idx( float pos_x, float pos_y, float tile_size, int map_count_x )
+// {
+//     int x = floor_f32_to_int( pos_x / tile_size );
+//     int y = floor_f32_to_int( pos_y / tile_size );
+//     int result = y * map_count_x + x;
+//     return result;
+// }
+
+internal_fn void draw_rectangle_px(
+    struct GameOffscreenBuffer* bitmap, u32 color,
+    int top_left_px_x, int top_left_px_y, int px_w, int px_h
+)
+{
+    u32* pixels = bitmap->memory;
+    int bitmap_idx = -1;
+    for ( int pixel_y = top_left_px_y; pixel_y < top_left_px_y + px_h; pixel_y++ )
+    {
+        for ( int pixel_x = top_left_px_x; pixel_x < top_left_px_x + px_w; pixel_x++ )
+        {
+            bitmap_idx = pixel_y * bitmap->width + pixel_x;
+            pixels[ bitmap_idx ] = color;
+        }
     }
 }
 
-internal_fn void
-game_render_borders( struct GameOffscreenBuffer* bitmap, int border_w )
+internal_fn void game_render_terrain(
+    const struct Terrain* t, float tile_size, struct GameOffscreenBuffer* bitmap
+)
 {
-    u32* pixels = bitmap->memory;
-    int i = 0;
-    for ( int y = 0; y < bitmap->height; y++ )
+    float tile_size_px = tile_size * bitmap->pixels_per_meters;
+
+    for ( int y = 0; y < t->map_count_y; y++ )
     {
-        for ( int x = 0; x < bitmap->width; x++ )
+        for ( int x = 0; x < t->map_count_x; x++ )
         {
-            if ( x <= border_w || x > bitmap->width - border_w ||
-                 y <= border_w || y > bitmap->height - border_w )
+            int tmap_idx = y * t->map_count_x + x;
+            if ( t->map[ tmap_idx ] == 1 )
             {
-                pixels[ i ] = 0x446644;
+                u32 color = 0x446644;
+                int top_left_px_x = math_round_f32_to_int( x * tile_size_px );
+                int top_left_px_y = math_round_f32_to_int( y * tile_size_px );
+                draw_rectangle_px(
+                    bitmap, color, top_left_px_x, top_left_px_y, tile_size_px, tile_size_px
+                );
             }
-            i += 1;
         }
     }
 }
@@ -66,12 +119,17 @@ internal_fn void game_render_player(
 )
 {
     u32* pixels = bitmap->memory;
-    for ( float y = pos_y; y < pos_y + height; y += 1.0f )
+    int pixel_pos_x = math_round_f32_to_int( pos_x * bitmap->pixels_per_meters );
+    int pixel_pos_y = math_round_f32_to_int( pos_y * bitmap->pixels_per_meters );
+    int pixel_w = math_round_f32_to_int( width * bitmap->pixels_per_meters );
+    int pixel_h = math_round_f32_to_int( height * bitmap->pixels_per_meters );
+
+    for ( int y = pixel_pos_y; y < pixel_pos_y + pixel_h; y++ )
     {
-        for ( float x = pos_x; x < pos_x + width; x += 1.0f )
+        for ( int x = pixel_pos_x; x < pixel_pos_x + pixel_w; x++ )
         {
-            // const int i = y * bitmap->width + x;
-            const int i = (int)y * bitmap->width + (int)x;
+            // const int i = (int)y * bitmap->width + (int)x;
+            const int i = y * bitmap->width + x;
             pixels[ i ] = 0xFFFFFF;
         }
     }
@@ -94,22 +152,55 @@ void game_update_and_render(
     if ( game_memory->is_initialized == false )
     {
         gs->player = (struct Player){
-            .x = 2, .y = 2,
-            .speed = 50.0f
+            .x = 3, .y = 3
         };
 
         start_counter = platform->get_current_counter();
         end_counter = platform->get_current_counter();
+        gs->frame_count = 0;
 
         game_memory->is_initialized = true;
+        printf( "Initialized game memory. pixels/meter: %f \n", buffer->pixels_per_meters );
+    }
+
+    { // NOTE(Dolphin): These assignments are moved to init once we find right values for them
+        gs->tile_size_pixels = buffer->width / 16; // 80px for 1280px wide buffer
+        gs->tile_size_meters = 1.5;
+        buffer->pixels_per_meters = gs->tile_size_pixels / gs->tile_size_meters;
+
+        gs->player.w = 1.0;
+        gs->player.h = 1.5;
+        gs->player.speed = 5.0f;
     }
 
     delta_time = platform->get_seconds_elapsed( start_counter, platform->get_current_counter() );
-
     start_counter = platform->get_current_counter();
 
+    struct Terrain terrain = {
+        .map_count_x = 16,
+        .map_count_y = 9,
+        .map = {
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1,
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1,
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1,
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1,
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        }
+    };
+
     game_clear_screen_buffer( buffer );
-    game_render_borders( buffer, 20 );
+    // i64 clear_counter = platform->get_current_counter();
+    // float taken = platform->get_seconds_elapsed( start_counter, clear_counter );
+    // if ( gs->frame_count % 60 == 0 )
+    // {
+    //     printf( "| ms: %f | \n", taken * 1000.0f );
+    // }
+
+    game_render_terrain( &terrain, gs->tile_size_meters, buffer );
 
     // Player
     float dir_x = 0.0f;
@@ -138,8 +229,9 @@ void game_update_and_render(
     gs->player.y += dir_y;
 
     game_render_player(
-        buffer, gs->player.x, gs->player.y, 10, 15
+        buffer, gs->player.x, gs->player.y, gs->player.w, gs->player.h
     );
 
+    gs->frame_count += 1;
     end_counter = platform->get_current_counter();
 }

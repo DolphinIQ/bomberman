@@ -36,6 +36,7 @@ struct GameOffscreenBuffer
     int width;
     int height;
     int pitch;
+    float pixels_per_meters; // Its always used in drawing so I decided to put it here
     const int bytes_per_pixel;
 };
 
@@ -43,10 +44,21 @@ struct GameState
 {
     struct Player
     {
-        float x;
-        float y;
+        float w, h;
+        float x, y;
         float speed;
     } player;
+
+    float tile_size_pixels;
+    float tile_size_meters;
+    u64 frame_count;
+};
+
+struct Terrain
+{
+    u32 map[ 16 * 9 ];
+    int map_count_x;
+    int map_count_y;
 };
 
 struct PlatformCode

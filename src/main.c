@@ -343,7 +343,7 @@ win32_resize_dib_section(
 }
 
 internal_fn void
-win32_display_buffer_in_window( struct Win32Bitmap* bitmap, HDC device_ctx )
+win32_display_buffer_in_window( const struct Win32Bitmap* bitmap, HDC device_ctx )
 {
     // TODO: Aspect ratio correction
     StretchDIBits(
@@ -537,7 +537,7 @@ int WINAPI WinMain(
     ShowWindow( window_handle, show_type );
 
     HDC device_ctx = GetDC( window_handle );
-    // render_size = window_dimensions;
+    render_size = window_dimensions;
     win32_resize_dib_section( &bitmap_buffer, render_size.width, render_size.height );
     win32_init_xaudio2( window_handle );
     struct Win32GameCode game_code = win32_load_game_code( window_handle );
@@ -546,6 +546,15 @@ int WINAPI WinMain(
         .get_seconds_elapsed = win32_get_seconds_elapsed
     };
     struct ThreadContext thread_context = { 0 };
+
+    // Pack screen buffer into a platform independent struct for game
+    struct GameOffscreenBuffer offscreen_buffer = {
+        .memory = bitmap_buffer.memory,
+        .width = bitmap_buffer.width,
+        .height = bitmap_buffer.height,
+        .pitch = bitmap_buffer.pitch,
+        .bytes_per_pixel = bitmap_buffer.bytes_per_pixel,
+    };
 
     struct GameMemory game_memory = { 0 };
     game_memory.permanent_memory_size = 1*MB;
@@ -613,15 +622,6 @@ int WINAPI WinMain(
             game_code = win32_load_game_code( window_handle );
         }
 
-        // Pack screen buffer into a platform independent struct for game
-        struct GameOffscreenBuffer offscreen_buffer = {
-            .memory = bitmap_buffer.memory,
-            .width = bitmap_buffer.width,
-            .height = bitmap_buffer.height,
-            .pitch = bitmap_buffer.pitch,
-            .bytes_per_pixel = bitmap_buffer.bytes_per_pixel,
-        };
-
         game_code.game_update_and_render(
             &thread_context, &platform_code, &game_memory, &input, &offscreen_buffer
         );
@@ -646,7 +646,6 @@ int WINAPI WinMain(
             //     "| elapsed: %f | delta: %f | ms/f: %f | FPS: %lli | \n", total_elapsed_time,
             //     delta_time, seconds_elapsed_this_frame * 1000, frames_per_second
             // );
-            if ( frame_count == 60 ) printf( "FPS: %lli \n", frames_per_second );
 
             float sleep_duration_s = target_sec_per_frame - seconds_elapsed_this_frame;
             if ( sleep_duration_s > 0 )
@@ -659,6 +658,14 @@ int WINAPI WinMain(
                 {
                     Sleep( (DWORD)(target_sec_per_frame * 1000) - 1 );
                 }
+            }
+
+            if ( frame_count == 120 )
+            {
+                printf( "Performance FPS: %lli \n", frames_per_second );
+                counts_per_frame = win32_get_current_counter() - start_counter;
+                frames_per_second = global_perf_frequency / counts_per_frame;
+                printf( "Real FPS: %lli \n", frames_per_second );
             }
         }
 
