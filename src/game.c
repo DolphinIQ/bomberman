@@ -5,7 +5,7 @@
 #include "bomberman_math.h"
 #include "game.h"
 
-global_var float delta_time = 0.0f;
+global_var f32 delta_time = 0.0f;
 // global_var double total_elapsed_time = 0.0;
 global_var i64 start_counter = 0;
 global_var i64 end_counter = 0;
@@ -63,14 +63,13 @@ internal_fn void game_clear_screen_buffer( struct GameOffscreenBuffer* bitmap )
     
 }
 
-// internal_fn int pos_to_map_idx( float pos_x, float pos_y, float tile_size, int map_count_x )
+// internal_fn int pos_to_map_idx( f32 pos_x, f32 pos_y, f32 tile_size, int map_count_x )
 // {
 //     int x = floor_f32_to_int( pos_x / tile_size );
 //     int y = floor_f32_to_int( pos_y / tile_size );
 //     int result = y * map_count_x + x;
 //     return result;
 // }
-
 
 internal_fn void draw_triangle_px(
     struct GameOffscreenBuffer* bitmap, u32 color,
@@ -112,11 +111,10 @@ internal_fn void draw_rectangle_px(
     }
 }
 
-internal_fn void game_render_terrain(
-    const struct Terrain* t, float tile_size, struct GameOffscreenBuffer* bitmap
-)
+internal_fn void
+game_render_terrain( const struct Terrain* t, f32 tile_size, struct GameOffscreenBuffer* bitmap )
 {
-    const float tile_size_px = tile_size * bitmap->pixels_per_meter;
+    const f32 tile_size_px = tile_size * bitmap->pixels_per_meter;
 
     for ( int y = 0; y < t->map_count_y; y++ )
     {
@@ -136,10 +134,44 @@ internal_fn void game_render_terrain(
     }
 }
 
+internal_fn bool32
+rect_contains_point( f32 rect_x, f32 rect_y, f32 rect_w, f32 rect_h, f32 p_x, f32 p_y )
+{
+    const f32 rect_x_right = rect_x + rect_w;
+    const f32 rect_y_bottom = rect_y + rect_h;
+
+    if ( p_x < rect_x || p_x > rect_x_right || p_y < rect_y || p_y > rect_y_bottom )
+    {
+        return false;
+    }
+    return true;
+}
+
+internal_fn bool32
+terrain_check_collision_vs_point( const struct Terrain* terrain, f32 rect_size, f32 p_x, f32 p_y )
+{
+    for ( int i = 0; i < terrain->map_count_x * terrain->map_count_y; i++ )
+    {
+        // Only check against blocking tiles, like walls etc.
+        if ( terrain->map[ i ] != 1 ) continue;
+
+        const int x = i % terrain->map_count_x;
+        const int y = i / terrain->map_count_x;
+        const f32 rect_x = (f32)x * rect_size;
+        const f32 rect_y = (f32)y * rect_size;
+
+        if ( rect_contains_point( rect_x, rect_y, rect_size, rect_size, p_x, p_y ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 internal_fn void game_render_player(
     struct GameOffscreenBuffer* bitmap,
-    float pos_x, float pos_y,
-    float width, float height
+    f32 pos_x, f32 pos_y,
+    f32 width, f32 height
 )
 {
     u32* pixels = bitmap->memory;
@@ -179,9 +211,9 @@ void game_update_and_render(
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1,
-            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1,
+            1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1,
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1,
-            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1,
+            1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1,
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         }
@@ -216,12 +248,12 @@ void game_update_and_render(
     start_counter = platform->get_current_counter();
 
     game_clear_screen_buffer( buffer );
-    i64 clear_counter = platform->get_current_counter();
-    float taken = platform->get_seconds_elapsed( start_counter, clear_counter );
-    if ( gs->frame_count % 60 == 0 )
-    {
-        printf( "| ms: %f | \n", taken * 1000.0f );
-    }
+    // i64 clear_counter = platform->get_current_counter();
+    // f32 taken = platform->get_seconds_elapsed( start_counter, clear_counter );
+    // if ( gs->frame_count % 60 == 0 )
+    // {
+    //     printf( "| ms: %f | \n", taken * 1000.0f );
+    // }
 
     game_render_terrain( &terrain, gs->tile_size_meters, buffer );
 
@@ -230,35 +262,66 @@ void game_update_and_render(
     const int triangle_h = 3.0f * buffer->pixels_per_meter;
     draw_triangle_px( buffer, 0xff0000, triangle_x, triangle_y, triangle_h );
 
-    // Player
-    float dir_x = 0.0f;
-    float dir_y = 0.0f;
-    if ( input->up.is_down )
-    {
-        dir_y -= 1.0f;
-    }
-    if ( input->down.is_down )
-    {
-        dir_y += 1.0f;
-    }
-    if ( input->left.is_down )
-    {
-        dir_x -= 1.0f;
-    }
-    if ( input->right.is_down )
-    {
-        dir_x += 1.0f;
-    }
-    // TODO(Dolphin): This results in higher speed diagonally. Fix when vectors
-    dir_x *= gs->player.speed * delta_time;
-    dir_y *= gs->player.speed * delta_time;
+    { // Player update and render
+        f32 dir_x = 0.0f;
+        f32 dir_y = 0.0f;
+        if ( input->up.is_down )
+        {
+            dir_y -= 1.0f;
+        }
+        if ( input->down.is_down )
+        {
+            dir_y += 1.0f;
+        }
+        if ( input->left.is_down )
+        {
+            dir_x -= 1.0f;
+        }
+        if ( input->right.is_down )
+        {
+            dir_x += 1.0f;
+        }
+        // TODO(Dolphin): This results in higher speed diagonally. Fix when vectors
+        dir_x *= gs->player.speed * delta_time;
+        dir_y *= gs->player.speed * delta_time;
 
-    gs->player.x += dir_x;
-    gs->player.y += dir_y;
+        const f32 new_player_x = gs->player.x + dir_x;
+        const f32 new_player_y = gs->player.y + dir_y;
 
-    game_render_player(
-        buffer, gs->player.x, gs->player.y, gs->player.w, gs->player.h
-    );
+        // Check terrain collision for 3 bottom points of player rectangle
+        bool32 move_allowed = true;
+        f32 check_x = new_player_x + gs->player.w * 0.5f;
+        f32 check_y = new_player_y + gs->player.h;
+        const f32 rect_size = gs->tile_size_meters;
+
+        if ( terrain_check_collision_vs_point( &terrain, rect_size, check_x, check_y ) )
+        {
+            move_allowed = false;
+        }
+
+        check_x = new_player_x;
+        if ( move_allowed && terrain_check_collision_vs_point( &terrain, rect_size, check_x, check_y ) )
+        {
+            move_allowed = false;
+        }
+
+        check_x = new_player_x + gs->player.w;
+        if ( move_allowed && terrain_check_collision_vs_point( &terrain, rect_size, check_x, check_y ) )
+        {
+            move_allowed = false;
+        }
+
+        if ( move_allowed )
+        {
+            gs->player.x = new_player_x;
+            gs->player.y = new_player_y;
+        }
+
+        // Render
+        game_render_player(
+            buffer, gs->player.x, gs->player.y, gs->player.w, gs->player.h
+        );
+    }
 
     gs->frame_count += 1;
     end_counter = platform->get_current_counter();

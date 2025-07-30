@@ -25,9 +25,17 @@ typedef int16_t i16;
 typedef int32_t i32;
 typedef int64_t i64;
 
+typedef float f32;
+typedef double f64;
+
 typedef u8 byte;
 typedef u8 bool8;
 typedef u32 bool32;
+
+// #define i32 int32_t
+// #define i64 int64_t
+// #define bool8 u8
+// #define bool32 u32
 
 // #define UNUSED( x ) x = x
 // void unused( int count, ... )
