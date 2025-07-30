@@ -1,1 +1,1 @@
-gcc -Wall -Wextra -ggdb -shared src/game.c -o game.dll
+gcc -Wall -Wextra -ggdb -shared -mavx src/game.c -o game.dll
