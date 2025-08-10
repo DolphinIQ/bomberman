@@ -96,25 +96,64 @@ internal_fn void draw_triangle_px(
 
 internal_fn void draw_rectangle_px(
     struct GameOffscreenBuffer* bitmap, u32 color,
-    int top_left_px_x, int top_left_px_y, int px_w, int px_h
+    int bottom_left_px_x, int bottom_left_px_y, int px_w, int px_h
 )
 {
     u32* pixels = bitmap->memory;
     int bitmap_idx = -1;
-    for ( int pixel_y = top_left_px_y; pixel_y < top_left_px_y + px_h; pixel_y++ )
+    for ( int pixel_y = bottom_left_px_y; pixel_y < bottom_left_px_y + px_h; pixel_y++ )
     {
-        for ( int pixel_x = top_left_px_x; pixel_x < top_left_px_x + px_w; pixel_x++ )
+        for ( int pixel_x = bottom_left_px_x; pixel_x < bottom_left_px_x + px_w; pixel_x++ )
         {
-            bitmap_idx = pixel_y * bitmap->width + pixel_x;
+            // Flip Y pixel so that Y+ axis becomes up!
+            const int pixel_y_flipped = bitmap->height - pixel_y - 1;
+            bitmap_idx = pixel_y_flipped * bitmap->width + pixel_x;
+            Assert( bitmap_idx < bitmap->width * bitmap->height );
             pixels[ bitmap_idx ] = color;
         }
     }
 }
 
 internal_fn void
+draw_rectangle_bottom_left(
+    struct GameOffscreenBuffer* bitmap, u32 color, f32 bottom_left_x, f32 bottom_left_y, f32 width, f32 height
+)
+{
+    const int width_px = math_round_f32_to_int( width * bitmap->pixels_per_meter );
+    const int height_px = math_round_f32_to_int( height * bitmap->pixels_per_meter );
+    const int bottom_left_px_x = math_round_f32_to_int( bottom_left_x * bitmap->pixels_per_meter );
+    const int bottom_left_px_y = math_round_f32_to_int( bottom_left_y * bitmap->pixels_per_meter );
+    draw_rectangle_px( bitmap, color, bottom_left_px_x, bottom_left_px_y, width_px, height_px );
+}
+
+internal_fn void
+draw_rectangle_bottom_center(
+    struct GameOffscreenBuffer* bitmap, u32 color, f32 bottom_center_x, f32 bottom_center_y, f32 width, f32 height
+)
+{
+    const int width_px = math_round_f32_to_int( width * bitmap->pixels_per_meter );
+    const int height_px = math_round_f32_to_int( height * bitmap->pixels_per_meter );
+    const int bottom_left_px_x = math_round_f32_to_int( bottom_center_x * bitmap->pixels_per_meter - width_px / 2 );
+    const int bottom_left_px_y = math_round_f32_to_int( bottom_center_y * bitmap->pixels_per_meter );
+    draw_rectangle_px( bitmap, color, bottom_left_px_x, bottom_left_px_y, width_px, height_px );
+}
+
+internal_fn void
+draw_rectangle_center(
+    struct GameOffscreenBuffer* bitmap, u32 color, f32 center_x, f32 center_y, f32 width, f32 height
+)
+{
+    const int width_px = math_round_f32_to_int( width * bitmap->pixels_per_meter );
+    const int height_px = math_round_f32_to_int( height * bitmap->pixels_per_meter );
+    const int bottom_left_px_x = math_round_f32_to_int( center_x * bitmap->pixels_per_meter - width_px / 2 );
+    const int bottom_left_px_y = math_round_f32_to_int( center_y * bitmap->pixels_per_meter - height_px / 2 );
+    draw_rectangle_px( bitmap, color, bottom_left_px_x, bottom_left_px_y, width_px, height_px );
+}
+
+internal_fn void
 game_render_terrain( const struct Terrain* t, f32 tile_size, struct GameOffscreenBuffer* bitmap )
 {
-    const f32 tile_size_px = tile_size * bitmap->pixels_per_meter;
+    const u32 color = 0x446644;
 
     for ( int y = 0; y < t->map_count_y; y++ )
     {
@@ -123,11 +162,8 @@ game_render_terrain( const struct Terrain* t, f32 tile_size, struct GameOffscree
             int tmap_idx = y * t->map_count_x + x;
             if ( t->map[ tmap_idx ] == 1 )
             {
-                const u32 color = 0x446644;
-                const int top_left_px_x = math_round_f32_to_int( x * tile_size_px );
-                const int top_left_px_y = math_round_f32_to_int( y * tile_size_px );
-                draw_rectangle_px(
-                    bitmap, color, top_left_px_x, top_left_px_y, tile_size_px, tile_size_px
+                draw_rectangle_bottom_left(
+                    bitmap, color, (f32)x * tile_size, (f32)y * tile_size, tile_size, tile_size
                 );
             }
         }
@@ -168,28 +204,6 @@ terrain_check_collision_vs_point( const struct Terrain* terrain, f32 rect_size, 
     return false;
 }
 
-internal_fn void game_render_player(
-    struct GameOffscreenBuffer* bitmap,
-    f32 pos_x, f32 pos_y,
-    f32 width, f32 height
-)
-{
-    u32* pixels = bitmap->memory;
-    const int pixel_pos_x = math_round_f32_to_int( pos_x * bitmap->pixels_per_meter );
-    const int pixel_pos_y = math_round_f32_to_int( pos_y * bitmap->pixels_per_meter );
-    const int pixel_w = math_round_f32_to_int( width * bitmap->pixels_per_meter );
-    const int pixel_h = math_round_f32_to_int( height * bitmap->pixels_per_meter );
-
-    for ( int y = pixel_pos_y; y < pixel_pos_y + pixel_h; y++ )
-    {
-        for ( int x = pixel_pos_x; x < pixel_pos_x + pixel_w; x++ )
-        {
-            const int i = y * bitmap->width + x;
-            pixels[ i ] = 0xFFFFFF;
-        }
-    }
-}
-
 void game_update_and_render(
     struct ThreadContext* thread,
     const struct PlatformCode* platform,
@@ -210,11 +224,11 @@ void game_update_and_render(
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1,
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1,
             1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1,
-            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1,
-            1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1,
-            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1,
+            1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+            1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         }
     };
@@ -267,11 +281,11 @@ void game_update_and_render(
         f32 dir_y = 0.0f;
         if ( input->up.is_down )
         {
-            dir_y -= 1.0f;
+            dir_y += 1.0f;
         }
         if ( input->down.is_down )
         {
-            dir_y += 1.0f;
+            dir_y -= 1.0f;
         }
         if ( input->left.is_down )
         {
@@ -290,8 +304,8 @@ void game_update_and_render(
 
         // Check terrain collision for 3 bottom points of player rectangle
         bool32 move_allowed = true;
-        f32 check_x = new_player_x + gs->player.w * 0.5f;
-        f32 check_y = new_player_y + gs->player.h;
+        f32 check_x = new_player_x - gs->player.w * 0.5f;
+        f32 check_y = new_player_y;
         const f32 rect_size = gs->tile_size_meters;
 
         if ( terrain_check_collision_vs_point( &terrain, rect_size, check_x, check_y ) )
@@ -305,7 +319,7 @@ void game_update_and_render(
             move_allowed = false;
         }
 
-        check_x = new_player_x + gs->player.w;
+        check_x = new_player_x + gs->player.w * 0.5f;
         if ( move_allowed && terrain_check_collision_vs_point( &terrain, rect_size, check_x, check_y ) )
         {
             move_allowed = false;
@@ -318,9 +332,8 @@ void game_update_and_render(
         }
 
         // Render
-        game_render_player(
-            buffer, gs->player.x, gs->player.y, gs->player.w, gs->player.h
-        );
+        draw_rectangle_bottom_center( buffer, 0xFFFFFF, gs->player.x, gs->player.y, gs->player.w, gs->player.h );
+        draw_rectangle_center( buffer, 0xFF0000, gs->player.x, gs->player.y, 0.1, 0.1 );
     }
 
     gs->frame_count += 1;

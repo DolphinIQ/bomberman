@@ -36,7 +36,8 @@ struct GameOffscreenBuffer
     int width;
     int height;
     int pitch;
-    float pixels_per_meter; // Its always used in drawing so I decided to put it here
+    // NOTE(DolphinIQ): Its always used in drawing so I decided to put it here for now
+    float pixels_per_meter;
     int ratio_w;
     int ratio_h;
     const int bytes_per_pixel;

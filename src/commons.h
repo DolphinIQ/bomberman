@@ -64,8 +64,7 @@ struct ThreadContext
     #define Assert( expression ) \
         if ( (expression) != true ) \
         { \
-            printf( "Assert( %s ) failed in %s:%i at %s() \n", \
-                    #expression, __FILE__, __LINE__, __FUNCTION__ ); \
+            printf( "Assert( %s ) failed in %s:%i \n", #expression, __FILE__, __LINE__ ); \
             *(int*)0 = 100; \
         }
 #else

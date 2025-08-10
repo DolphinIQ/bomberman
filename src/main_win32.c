@@ -20,7 +20,7 @@ typedef HRESULT XAudio2Create_type (
 
 // NOTE(Dolphin): Hard coded for now. Maybe do dynamic path finding in the future? :/
 const char* game_dll_name = "D:\\0_Coding_0\\C\\0_Games\\bomberman\\game.dll";
-const char* game_temp_dll_name = "game_temp.dll";
+const char* game_temp_dll_name = ".\\game_temp.dll";
 
 struct Win32GameCode
 {
@@ -100,7 +100,7 @@ internal_fn struct Win32GameCode win32_load_game_code( HWND window )
 {
     // Wait a moment to make sure that the changed source dll is finished compiling.
     // Otherwise its copied unfinished resulting in temp having size of 0 KB.
-    Sleep( 16 );
+    Sleep( 32 );
 
     struct Win32GameCode game_code = { 0 };
     game_code.last_write_time = win32_get_file_write_time( game_dll_name );
